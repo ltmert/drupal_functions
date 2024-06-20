@@ -1,0 +1,219 @@
+functions toolbox
+
+/*
+ * Gets domain form ehub_subdomain_trim_list
+ *
+ * Gets the domain from $_SERVER['SERVER_NAME'], And returns it after
+ * removing the ocurrrances of variable('var#1') * or
+ * 'www.','stage.','localhost.','local.','test.','dev.','dev1.','preview.',
+ * '.'
+ *
+ * @return string
+ */
+function test_domain_config_get_domain_name() {
+  static $domain_name;
+  
+  if (!$domain_name) {
+    // figure out what domain id we are using
+    $domain= strtolower(HTTP_HOST);
+    $domain_name = trimDomain($domain);
+  }
+  return $domain_name;
+}
+
+/**
+ * Menu callback which shows an overview page of all the custom menus and their descriptions.
+ */
+function menu_overview_page() {
+  $result = db_query("SELECT * FROM {menu_custom} ORDER BY title");
+  $content = array();
+  while ($menu = db_fetch_array($result)) {
+    $menu['href'] = 'admin/build/menu-customize/'. $menu['menu_name'];
+    $menu['localized_options'] = array();
+    $menu['description'] = filter_xss_admin($menu['description']);
+    $content[] = $menu;
+  }
+  return theme('admin_block_content', $content);
+}
+
+/**
+ * Form for editing an entire menu tree at once.
+ *
+ * Shows for one menu the menu items accessible to the current user and
+ * relevant operations.
+ */
+function menu_overview_form(&$form_state, $menu) {
+  global $menu_admin;
+  $sql = "
+    SELECT m.load_functions, m.to_arg_functions, m.access_callback, m.access_arguments, m.page_callback, m.page_arguments, m.title, m.title_callback, m.title_arguments, m.type, m.description, ml.*
+    FROM {menu_links} ml LEFT JOIN {menu_router} m ON m.path = ml.router_path
+    WHERE ml.menu_name = '%s'
+    ORDER BY p1 ASC, p2 ASC, p3 ASC, p4 ASC, p5 ASC, p6 ASC, p7 ASC, p8 ASC, p9 ASC";
+  $result = db_query($sql, $menu['menu_name']);
+  $tree = menu_tree_data($result);
+  $node_links = array();
+  menu_tree_collect_node_links($tree, $node_links);
+  // We indicate that a menu administrator is running the menu access check.
+  $menu_admin = TRUE;
+  menu_tree_check_access($tree, $node_links);
+  $menu_admin = FALSE;
+
+  $form = _menu_overview_tree_form($tree);
+  $form['#menu'] =  $menu;
+  if (element_children($form)) {
+    $form['submit'] = array(
+      '#type' => 'submit',
+      '#value' => t('Save configuration'),
+    );
+  }
+  else {
+    $form['empty_menu'] = array('#value' => t('There are no menu items yet.'));
+  }
+  return $form;
+}
+
+
+/**
+ * Return data from the persistent cache. Data may be stored as either plain text or as serialized data.
+ * cache_get will automatically return unserialized objects and arrays.
+ *
+ * @param $cid
+ *   The cache ID of the data to retrieve.
+ * @param $table
+ *   The table $table to store the data in. Valid core values are 'cache_filter',
+ *   'cache_menu', 'cache_page', or 'cache' for the default cache.
+ */
+function cache_get($cid, $table = 'cache') {
+  global $cache, $user;
+  if (!isset($cache)) {
+    $cache = new CacheRouter();
+  }
+  
+  $cache_object = $cache->get($cid, $table);  
+  if ($cache_object && isset($user->cache) && $user->cache > $cache_object->created) {
+    return 0;
+  }
+  
+  return $cache_object;
+}
+
+/**
+ * Store data in the persistent cache.
+ *
+ * The persistent cache is split up into four database
+ * tables. Contributed modules can add additional tables.
+ *
+ * 'cache_page': This table stores generated pages for anonymous
+ * users. This is the only table affected by the page cache setting on
+ * the administrator panel.
+ *
+ * 'cache_menu': Stores the cachable part of the users' menus.
+ *
+ * 'cache_filter': Stores filtered pieces of content. This table is
+ * periodically cleared of stale entries by cron.
+ *
+ * 'cache': Generic cache storage table.
+ *
+ * The reasons for having several tables are as follows:
+ *
+ * - smaller tables allow for faster selects and inserts
+ * - we try to put fast changing cache items and rather static
+ *   ones into different tables. The effect is that only the fast
+ *   changing tables will need a lot of writes to disk. The more
+ *   static tables will also be better cachable with MySQL's query cache
+ *
+ * @param $cid
+ *   The cache ID of the data to store.
+ * @param $data
+ *   The data to store in the cache. Complex data types will be automatically serialized before insertion.
+ *   Strings will be stored as plain text and not serialized.
+ * @param $table
+ *   The table $table to store the data in. Valid core values are 'cache_filter',
+ *   'cache_menu', 'cache_page', or 'cache'.
+ * @param $expire
+ *   One of the following values:
+ *   - CACHE_PERMANENT: Indicates that the item should never be removed unless
+ *     explicitly told to using cache_clear_all() with a cache ID.
+ *   - CACHE_TEMPORARY: Indicates that the item should be removed at the next
+ *     general cache wipe.
+ *   - A Unix timestamp: Indicates that the item should be kept at least until
+ *     the given time, after which it behaves like CACHE_TEMPORARY.
+ * @param $headers
+ *   A string containing HTTP header information for cached pages.
+ */
+function cache_set($cid, $value, $table = 'cache', $expire = CACHE_PERMANENT, $headers = NULL) {
+  global $cache;
+  if (!isset($cache)) {
+    $cache = new CacheRouter();
+  }
+  return $cache->set($cid, $value, $expire, $headers, $table);
+}
+
+
+
+<?php
+require 'Cache.php';
+
+class CacheRouter {
+  var $map = array();
+  var $settings = array();
+
+  function __construct() {
+    global $conf;
+    $conf['page_cache_fastpath'] = TRUE;
+  }
+  
+  private function __init($bin) {
+    global $conf;
+    
+    if (isset($conf['cacherouter'][$bin]['engine']) && !isset($this->map[$bin])) {
+      $type = strtolower($conf['cacherouter'][$bin]['engine']);
+    }
+    else {
+      $type = isset($conf['cacherouter']['default']['engine']) ? $conf['cacherouter']['default']['engine'] : 'db';
+    }
+    if (!class_exists($type . 'Cache')) {
+      if (!require(dirname(__FILE__) .'/engines/' . $type . '.php')) {
+        return FALSE;
+      }
+    }
+    $cache_engine = $type . 'Cache';
+    
+    $this->map[$bin] = new $cache_engine($bin);
+  }
+  
+  public function get($key, $bin) {
+    if (!isset($this->map[$bin])) {
+      $this->__init($bin);
+    }
+    return $this->map[$bin]->get($key);
+  }
+
+  public function set($key, $value, $expire, $headers, $bin) {
+    if (!isset($this->map[$bin])) {
+      $this->__init($bin);
+    }
+    return $this->map[$bin]->set($key, $value, $expire, $headers);
+  }
+
+  public function delete($key, $bin) {
+    if (!isset($this->map[$bin])) {
+      $this->__init($bin);
+    }
+    return $this->map[$bin]->delete($key);
+  }
+
+  public function flush($bin) {
+    if (!isset($this->map[$bin])) {
+      $this->__init($bin);
+    }
+    return $this->map[$bin]->flush();
+  }
+  
+  public function page_fast_cache($bin) {
+    if (!isset($this->map[$bin])) {
+      $this->__init($bin);
+    }
+    return $this->map[$bin]->page_fast_cache();
+  }
+}
