@@ -217,3 +217,93 @@ class CacheRouter {
     return $this->map[$bin]->page_fast_cache();
   }
 }
+
+
+//A common function I used on woocommerce, also utilized on Drupal on both v6 and v8. on v8 used drupal_http_request function but on v8 used guzzle as it exists
+
+function calculate_distance_drupal6($origin_address, $destination_address) {
+    $origin_address = urlencode($origin_address);
+    $destination_address = urlencode($destination_address);
+    $api_key = 'YOUR_GOOGLE_MAPS_API_KEY'; //config, getenv, or vault etc
+
+    $url = "https://maps.googleapis.com/maps/api/distancematrix/json?origins={$origin_address}&destinations={$destination_address}&key={$api_key}";
+
+    $response = drupal_http_request($url);
+
+    if ($response->code == 200) {
+        $data = drupal_json_decode($response->data);
+        if (!empty($data['rows'][0]['elements'][0]['distance']['value'])) {
+            // Distance in meters
+            $distance_in_meters = $data['rows'][0]['elements'][0]['distance']['value'];
+            // Convert distance to miles (1 mile = 1609.34 meters)
+            return $distance_in_meters / 1609.34; //yes only us not even Brits
+        }
+    }
+
+    return FALSE;
+}
+
+// Example usage:
+$origin = '799 Hammond drive Atlanta, GA 30328;
+$destination = 'Zanzibar';
+$distance = calculate_distance_drupal6($origin, $destination);
+if ($distance !== FALSE) {
+    drupal_set_message(t('The distance is @distance miles.', array('@distance' => round($distance, 2))));
+} else {
+    drupal_set_message(t('Unable to calculate distance.'), 'error');
+}
+
+
+//v8 version
+use GuzzleHttp\Client;
+use Symfony\Component\DependencyInjection\ContainerInterface;
+
+class DistanceCalculator {
+
+    protected $httpClient;
+
+    public function __construct(Client $http_client) {
+        $this->httpClient = $http_client;
+    }
+
+    public static function create(ContainerInterface $container) {
+        return new static(
+            $container->get('http_client')
+        );
+    }
+
+    public function calculateDistance($origin_address, $destination_address) {
+        $origin_address = urlencode($origin_address);
+        $destination_address = urlencode($destination_address);
+        $api_key = 'YOUR_GOOGLE_MAPS_API_KEY'; // Replace with your actual API key
+
+        $url = "https://maps.googleapis.com/maps/api/distancematrix/json?origins={$origin_address}&destinations={$destination_address}&key={$api_key}";
+
+        try {
+            $response = $this->httpClient->get($url);
+            $data = json_decode($response->getBody(), TRUE);
+            if (!empty($data['rows'][0]['elements'][0]['distance']['value'])) {
+                // Distance in meters
+                $distance_in_meters = $data['rows'][0]['elements'][0]['distance']['value'];
+                // Convert distance to miles (1 mile = 1609.34 meters)
+                return $distance_in_meters / 1609.34;
+            }
+        } catch (\Exception $e) {
+            \Drupal::logger('distance_calculator')->error($e->getMessage());
+        }
+
+        return FALSE;
+    }
+}
+
+// Example usage:
+$calculator = \Drupal::service('distance_calculator');
+$origin = '799 Hammond drive Atlanta, GA 30328';
+$destination = 'Mogadishu';
+$distance = $calculator->calculateDistance($origin, $destination);
+if ($distance !== FALSE) {
+    \Drupal::messenger()->addMessage(t('The distance is @distance miles.', ['@distance' => round($distance, 2)]));
+} else {
+    \Drupal::messenger()->addMessage(t('Unable to calculate distance.'), 'error');
+}
+
