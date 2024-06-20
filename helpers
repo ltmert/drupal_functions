@@ -224,6 +224,9 @@ class CacheRouter {
 
 
 //A common function I used on woocommerce, also utilized on Drupal on both v6 and v8. on v8 used drupal_http_request function but on v8 used guzzle as it exists
+// A running version of the function lives on https://gyrocafeatlanta.com
+//on catering part(rest are connected to 3rd part providers, a custom code also sends orders from woocommerce to shopify POS), once went to checkout, everytime address 
+updates, delivery fee changes, limit is 75. On drupal only google API call function is shown. Also settings og google API site not included
 
 function calculate_distance_drupal6($origin_address, $destination_address) {
     $origin_address = urlencode($origin_address);
