@@ -1,5 +1,9 @@
 functions toolbox
 
+//common functions I used, modified, debugged often; cache, system functions. I kept the comments on cache as keeping it in separate tables helped, which was a practice
+I used on some high traffic tables( I had couple of issues, where id limit exceeded and had to go thorugh some issues). Lastly I shared two versions of google PAI call from
+Drupal. I originally wrote the code for woocommerce.
+
 /*
  * Gets domain form ehub_subdomain_trim_list
  *
